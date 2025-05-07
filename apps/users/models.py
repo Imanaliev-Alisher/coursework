@@ -6,6 +6,6 @@ from .managers import UserManager
 
 class User(AbstractUser):
 
-    REQUIRED_FIELDS = ['username']
+    REQUIRED_FIELDS = []
 
     objects = UserManager()
