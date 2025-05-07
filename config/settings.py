@@ -94,7 +94,7 @@ CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 # Database
 # ------------------------------------------------------------------------------
 
-DATABASES = {'default': env("DATABASE_URL")}
+DATABASES = {'default': env.db("DATABASE_URL")}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
