@@ -1,0 +1,76 @@
+volumes:
+  production_postgres_data: {}
+  production_postgres_data_backups: {}
+  production_django_media: {}
+  production_django_static: {}
+  production_redis_data: {}
+
+
+
+services:
+  django: &django
+    build:
+      context: .
+      dockerfile: ./compose/django/Dockerfile
+
+    image: mobile_production_django
+    volumes:
+      - .:/app:z
+      - production_django_media:/app/mobile/media
+      - production_django_static:/app/staticfiles
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - ./.envs/.django
+      - ./.envs/.postgres
+    command: /start
+    restart: unless-stopped
+
+  postgres:
+    build:
+      context: .
+      dockerfile: ./compose/postgres/Dockerfile
+    image: mobile_production_postgres
+    volumes:
+      - production_postgres_data:/var/lib/postgresql/data
+      - production_postgres_data_backups:/backups
+    env_file:
+      - ./.envs/.postgres
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: docker.io/redis:6
+
+    volumes:
+      - production_redis_data:/data
+    restart: unless-stopped
+
+
+  celeryworker:
+    <<: *django
+    image: mobile_production_celeryworker
+    command: /start-celeryworker
+    restart: unless-stopped
+
+  celerybeat:
+    <<: *django
+    image: mobile_production_celerybeat
+    command: /start-celerybeat
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ./compose/nginx/Dockerfile
+    image: mobile_production_nginx
+    depends_on:
+      - django
+    volumes:
+      - production_django_media:/usr/share/nginx/media:ro
+      - production_django_static:/usr/share/nginx/staticfiles
+    ports:
+      - '80:80'
+    restart: unless-stopped
