@@ -11,22 +11,8 @@ class WeekDays(Enum):
     SATURDAY: str = 'Суббота'
     SUNDAY: str = 'Воскресенье'
 
-    class Labels:
-        MONDAY = _('Понедельник')
-        TUESDAY = _('Вторник')
-        WEDNESDAY = _('Среда')
-        THURSDAY = _('Четверг')
-        FRIDAY = _('Пятница')
-        SATURDAY = _('Суббота')
-        SUNDAY = _('Воскресенье')
-
 
 class EvenOddBoth(Enum):
     EVEN: str = 'Четные'
     ODD: str = 'Нечетные'
     BOTH: str = 'Всегда'
-
-    class Labels:
-        EVEN = _('Четные')
-        ODD = _('Нечетные')
-        BOTH = _('Всегда')

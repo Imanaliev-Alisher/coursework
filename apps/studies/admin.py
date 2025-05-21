@@ -31,4 +31,5 @@ class ScheduleAdmin(admin.ModelAdmin):
 @admin.register(Subjects)
 class SubjectsAdmin(admin.ModelAdmin):
     list_display = ['title',]
-    search_fields = ['title',]
+    list_filter = ['schedule', 'teachers', 'groups']
+    search_fields = ['title', 'teachers', 'groups']
