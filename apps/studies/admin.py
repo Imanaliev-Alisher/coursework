@@ -1,19 +1,18 @@
 from django.contrib import admin
-from .models import Teachers, Students, SubjectsTypes, Schedule, Subjects
+from .models import TimeSlot, Day, SubjectsTypes, Schedule, Subjects, ScheduleOverride
 
 
-@admin.register(Teachers)
-class TeachersAdmin(admin.ModelAdmin):
-    list_display = ['user',]
-    list_filter = ['position',]
-    search_fields = ['user', 'position',]
+@admin.register(TimeSlot)
+class TimeSlotAdmin(admin.ModelAdmin):
+    list_display = ['number', 'start_time', 'end_time']
+    list_filter = ['number',]
+    ordering = ['number',]
 
 
-@admin.register(Students)
-class StudentsAdmin(admin.ModelAdmin):
-    list_display = ['user',]
-    list_filter = ['groups',]
-    search_fields = ['user', 'groups',]
+@admin.register(Day)
+class DayAdmin(admin.ModelAdmin):
+    list_display = ['title',]
+    search_fields = ['title',]
 
 
 @admin.register(SubjectsTypes)
@@ -24,12 +23,22 @@ class SubjectsTypesAdmin(admin.ModelAdmin):
 
 @admin.register(Schedule)
 class ScheduleAdmin(admin.ModelAdmin):
-    list_display = ['week_day', 'week_type', 'time',]
-    list_filter = ['time', 'week_day',]
+    list_display = ['week_day', 'time_slot', 'week_type']
+    list_filter = ['week_day', 'time_slot', 'week_type']
 
 
 @admin.register(Subjects)
 class SubjectsAdmin(admin.ModelAdmin):
-    list_display = ['title',]
-    list_filter = ['schedule', 'teachers', 'groups']
-    search_fields = ['title', 'teachers', 'groups']
+    list_display = ['title', 'subject_type', 'audience']
+    list_filter = ['subject_type', 'groups']
+    search_fields = ['title',]
+    filter_horizontal = ['schedule', 'teachers', 'groups']
+
+
+@admin.register(ScheduleOverride)
+class ScheduleOverrideAdmin(admin.ModelAdmin):
+    list_display = ['subject', 'date', 'time_slot', 'audience', 'is_cancelled']
+    list_filter = ['is_cancelled', 'date']
+    search_fields = ['subject__title', 'notes']
+    ordering = ['-date', 'time_slot__number']
+

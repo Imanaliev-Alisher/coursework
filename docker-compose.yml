@@ -22,10 +22,8 @@ services:
       - postgres
       - redis
     env_file:
-      - ./.envs/.django
-      - ./.envs/.postgres
+      - ./.env
     command: /start
-    restart: unless-stopped
 
   postgres:
     build:
@@ -36,30 +34,26 @@ services:
       - production_postgres_data:/var/lib/postgresql/data
       - production_postgres_data_backups:/backups
     env_file:
-      - ./.envs/.postgres
+      - ./.env
     ports:
       - "5432:5432"
-    restart: unless-stopped
 
   redis:
     image: docker.io/redis:6
 
     volumes:
       - production_redis_data:/data
-    restart: unless-stopped
 
 
   celeryworker:
     <<: *django
     image: mobile_production_celeryworker
     command: /start-celeryworker
-    restart: unless-stopped
 
   celerybeat:
     <<: *django
     image: mobile_production_celerybeat
     command: /start-celerybeat
-    restart: unless-stopped
 
   nginx:
     build:
@@ -72,5 +66,4 @@ services:
       - production_django_media:/usr/share/nginx/media:ro
       - production_django_static:/usr/share/nginx/staticfiles
     ports:
-      - '80:80'
-    restart: unless-stopped
+      - '8000:80'

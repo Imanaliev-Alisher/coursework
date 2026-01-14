@@ -8,4 +8,4 @@ set -o nounset
 python manage.py migrate
 python /app/manage.py collectstatic --noinput
 
-exec /usr/local/bin/gunicorn config.asgi --bind 0.0.0.0:5000 --chdir=/app -k uvicorn_worker.UvicornWorker
+exec /usr/local/bin/gunicorn config.asgi --bind 0.0.0.0:5000 --chdir=/app -k uvicorn_worker.UvicornWorker --reload

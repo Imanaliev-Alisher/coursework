@@ -1,65 +1,64 @@
 from apps.buildings.models import Audiences
 from apps.groups.models import StudyGroups
 
-from enumfields import EnumField
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
-from .enums import WeekDays, EvenOddBoth
+from .choices import EvenOddBoth
 
 
-class Teachers(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        verbose_name=_('Пользователь'),
-        help_text=_('Выберите пользователя который должен быть преподавателем')
+class TimeSlot(models.Model):
+    """Временной слот (пара) - например, 1-я пара: 8:00-9:30"""
+    number = models.PositiveSmallIntegerField(
+        _('Номер пары'),
+        unique=True,
+        help_text=_('Введите номер пары (1, 2, 3...)')
     )
-    position = models.CharField(
-        max_length=63,
-        blank=True,
-        verbose_name=_('Должность'),
-        help_text=_('Введите должность преподавателя')
+    start_time = models.TimeField(
+        _('Время начала'),
+        help_text=_('Введите время начала пары')
     )
-
-    class Meta:
-        verbose_name = _('Преподаватель')
-        verbose_name_plural = _('Преподаватели')
-
-    def __str__(self):
-        fullname = self.user.get_full_name()
-        return fullname
-
-
-class Students(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        verbose_name=_('Пользователь'),
-        help_text=_('Выберите пользователя который должен быть студентом')
-    )
-    groups = models.ForeignKey(
-        StudyGroups,
-        on_delete=models.PROTECT,
-        related_name='students',
-        verbose_name=_('Учебная группа'),
-        help_text=_('Выберите в какой учебной группе должен числиться этот студент.')
+    end_time = models.TimeField(
+        _('Время окончания'),
+        help_text=_('Введите время окончания пары')
     )
 
     class Meta:
-        verbose_name = _('Студент')
-        verbose_name_plural = _('Студенты')
+        verbose_name = _('Временной слот (пара)')
+        verbose_name_plural = _('Временные слоты (пары)')
+        ordering = ['number']
+
+    def clean(self):
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValidationError(
+                _('Время начала должно быть меньше времени окончания')
+            )
 
     def __str__(self):
-        fullname = self.user.get_full_name()
-        return fullname
+        return f"{self.number}-я пара ({self.start_time.strftime('%H:%M')}-{self.end_time.strftime('%H:%M')})"
+
+
+class Day(models.Model):
+    title = models.CharField(
+        _('Наименование'),
+        max_length=31,
+        help_text=_('Введите наименование дня недели')
+    )
+
+    class Meta:
+        verbose_name = _('День недели')
+        verbose_name_plural = _('Дни недели')
+
+    def __str__(self):
+        return self.title
 
 
 class SubjectsTypes(models.Model):
     title = models.CharField(
+        _('Наименование'),
         max_length=127,
-        verbose_name=_('Наименование'),
         help_text=_('Введите наименование типа')
     )
 
@@ -72,41 +71,45 @@ class SubjectsTypes(models.Model):
 
 
 class Schedule(models.Model):
-    week_day = EnumField(
-        WeekDays, 
-        max_length=31,
+    week_day = models.ForeignKey(
+        Day,
+        on_delete=models.PROTECT,
         verbose_name=_('День недели'),
         help_text=_('Выберите день недели')
     )
-    time = models.TimeField(
-        verbose_name=_('Время'),
-        help_text=_('Выберите время')
+    time_slot = models.ForeignKey(
+        TimeSlot,
+        on_delete=models.PROTECT,
+        verbose_name=_('Временной слот (пара)'),
+        help_text=_('Выберите номер пары')
     )
-    week_type = EnumField(
-        EvenOddBoth,
+    week_type = models.CharField(
+        _('Тип недели'),
+        choices=EvenOddBoth.choices,
+        default=EvenOddBoth.BOTH,
         max_length=31,
-        verbose_name=_('Тип недели'),
         help_text=_('Выберите тип недели')
     )
 
     class Meta:
         verbose_name = _('Расписание')
-        verbose_name_plural = _('Расписании')
+        verbose_name_plural = _('Расписания')
+        unique_together = ['week_day', 'time_slot', 'week_type']
 
     def __str__(self):
-        return f"{self.week_day}: {self.week_type}: {self.time}"
+        return f"{self.week_day} - {self.time_slot} ({self.week_type})"
 
 
 class Subjects(models.Model):
     title = models.CharField(
+        _("Название предмета"),
         max_length=255,
-        verbose_name=_("Название предмета"),
-        help_text=_('Введите назвние предмета')
+        help_text=_('Введите название предмета')
     )
     schedule = models.ManyToManyField(
         Schedule,
         verbose_name=_('Расписание'),
-        help_text=_('Выберите подходящие расписание')
+        help_text=_('Выберите подходящее расписание')
     )
     audience = models.ForeignKey(
         Audiences,
@@ -123,13 +126,16 @@ class Subjects(models.Model):
         help_text=_('Выберите тип предмета')
     )
     teachers = models.ManyToManyField(
-        Teachers,
-        verbose_name=_('Преподователи'),
-        help_text=_('Выберите преподавателей предмета')
+        settings.AUTH_USER_MODEL,
+        related_name='teaching_subjects',
+        verbose_name=_('Преподаватели'),
+        help_text=_('Выберите преподавателей предмета'),
+        limit_choices_to={'role': 'TEACHER'}
     )
     groups = models.ManyToManyField(
         StudyGroups,
-        verbose_name=_('Учебная группа'),
+        related_name='subjects',
+        verbose_name=_('Учебные группы'),
         help_text=_('Выберите учебные группы')
     )
 
@@ -138,4 +144,57 @@ class Subjects(models.Model):
         verbose_name_plural = _('Предметы')
 
     def __str__(self):
-        return f"{self.title} ({self.subject_type.__str__()})"
+        return f"{self.title} ({self.subject_type})"
+
+
+class ScheduleOverride(models.Model):
+    """
+    Переопределение расписания для конкретной недели.
+    Позволяет создавать динамическое расписание на определенный период.
+    """
+    subject = models.ForeignKey(
+        Subjects,
+        on_delete=models.CASCADE,
+        related_name='schedule_overrides',
+        verbose_name=_('Предмет'),
+        help_text=_('Выберите предмет')
+    )
+    date = models.DateField(
+        _('Дата'),
+        help_text=_('Дата проведения занятия')
+    )
+    time_slot = models.ForeignKey(
+        TimeSlot,
+        on_delete=models.PROTECT,
+        verbose_name=_('Временной слот (пара)'),
+        help_text=_('Выберите номер пары')
+    )
+    audience = models.ForeignKey(
+        Audiences,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name=_('Аудитория (переопределение)'),
+        help_text=_('Оставьте пустым, чтобы использовать аудиторию из основного расписания')
+    )
+    is_cancelled = models.BooleanField(
+        _('Занятие отменено'),
+        default=False,
+        help_text=_('Отметьте, если занятие отменяется')
+    )
+    notes = models.TextField(
+        _('Примечания'),
+        blank=True,
+        help_text=_('Дополнительная информация об изменении')
+    )
+
+    class Meta:
+        verbose_name = _('Переопределение расписания')
+        verbose_name_plural = _('Переопределения расписания')
+        unique_together = ['subject', 'date', 'time_slot']
+        ordering = ['date', 'time_slot__number']
+
+    def __str__(self):
+        status = _('Отменено') if self.is_cancelled else _('Перенесено')
+        return f"{self.subject.title} - {self.date} ({status})"
+

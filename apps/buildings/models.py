@@ -5,38 +5,38 @@ from django_countries.fields import CountryField
 
 class Buildings(models.Model):
     title = models.CharField(
+        _('Строение(Корпус)'),
         max_length=255,
-        verbose_name=_('Строение(Корпус)'),
         help_text=_('Введите наименование строения(корпуса)')
     )
     country = CountryField(
-        verbose_name=_('Страна'),
+        _('Страна'),
         help_text=_('Введите страну где находится строение(корпус)')
     )
     region = models.CharField(
+        _('Регион'),
         max_length=100,
-        verbose_name=_('Регион'),
         blank=True,
         help_text=_('Введите регион где находится строение(корпус)')
     )
     city = models.CharField(
+        _('Город'),
         max_length=100,
-        verbose_name=_('Город'),
         help_text=_('Введите город где находится строение(корпус)')
     )
     street = models.CharField(
+        _('Улица'),
         max_length=255,
-        verbose_name=_('Улица'),
         help_text=_('Введите улицу где находится строение(корпус)')
     )
     house_number = models.CharField(
+        _('Номер строения'),
         max_length=100,
-        verbose_name=_('Номер строения'),
         help_text=_('Введите номер строения')
     )
     address = models.TextField(
+        _('Адрес строения'),
         blank=True,
-        verbose_name=_('Адрес строения'),
         help_text=_('Введите адрес строения')
     )
 
@@ -56,8 +56,8 @@ class Buildings(models.Model):
 
 class AudiencesTypes(models.Model):
     title = models.CharField(
+        _('Название'),
         max_length=63,
-        verbose_name=_('Название'),
         help_text=_('Введите название типа')
     )
 
@@ -71,13 +71,13 @@ class AudiencesTypes(models.Model):
 
 class Audiences(models.Model):
     title = models.CharField(
+        _('Введите название аудитории'),
         max_length=63,
-        verbose_name=_('Введите название аудитории'),
         blank=True,
         help_text=_('Название (если не указано — сформируется автоматически)')
     )
     auditorium_number = models.PositiveSmallIntegerField(
-        verbose_name=_('Номер аудитории'),
+        _('Номер аудитории'),
         help_text=_('Введите номер аудитории')
     )
     auditorium_type = models.ForeignKey(
@@ -89,7 +89,7 @@ class Audiences(models.Model):
         help_text=_('Выберите тип аудитории')
     )
     floor_number = models.PositiveSmallIntegerField(
-        verbose_name=_('Этаж'),
+        _('Этаж'),
         help_text=_('Введите этаж на котором находиться аудитория')
     )
     building = models.ForeignKey(
