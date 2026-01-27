@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils.translation import gettext_lazy as _
 
-from .models import TimeSlot, Day, SubjectsTypes, Schedule, Subjects, ScheduleOverride
+from .models import TimeSlot, Day, SubjectsTypes, SubjectSchedule, Subjects
 from apps.buildings.models import Audiences
 from apps.groups.models import StudyGroups
 
@@ -49,133 +49,97 @@ class SubjectsTypesSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
-class ScheduleListSerializer(serializers.ModelSerializer):
-    """Сериализатор для списка расписаний (краткая информация)"""
+class SubjectScheduleListSerializer(serializers.ModelSerializer):
+    """Сериализатор для расписания предмета (краткая информация)"""
     
     week_day_name = serializers.CharField(source='week_day.title', read_only=True)
     time_slot_display = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Schedule
-        fields = [
-            'id',
-            'week_day',
-            'week_day_name',
-            'time_slot',
-            'time_slot_display',
-            'week_type',
-        ]
-        read_only_fields = ['id']
-    
-    def get_time_slot_display(self, obj):
-        return str(obj.time_slot)
-
-
-class ScheduleDetailSerializer(serializers.ModelSerializer):
-    """Сериализатор для детальной информации о расписании"""
-    
-    week_day_details = DaySerializer(source='week_day', read_only=True)
-    time_slot_details = TimeSlotSerializer(source='time_slot', read_only=True)
-    
-    class Meta:
-        model = Schedule
-        fields = [
-            'id',
-            'week_day',
-            'week_day_details',
-            'time_slot',
-            'time_slot_details',
-            'week_type',
-        ]
-        read_only_fields = ['id']
-
-
-class ScheduleCreateUpdateSerializer(serializers.ModelSerializer):
-    """Сериализатор для создания/обновления расписания"""
-    
-    class Meta:
-        model = Schedule
-        fields = ['week_day', 'time_slot', 'week_type']
-    
-    def validate(self, data):
-        # Проверка уникальности комбинации
-        instance = self.instance
-        queryset = Schedule.objects.filter(
-            week_day=data.get('week_day'),
-            time_slot=data.get('time_slot'),
-            week_type=data.get('week_type')
-        )
-        
-        if instance:
-            queryset = queryset.exclude(pk=instance.pk)
-        
-        if queryset.exists():
-            raise serializers.ValidationError(
-                _('Расписание с такой комбинацией дня, времени и типа недели уже существует.')
-            )
-        
-        return data
-
-
-class SubjectsListSerializer(serializers.ModelSerializer):
-    """Сериализатор для списка предметов (краткая информация)"""
-    
-    subject_type_name = serializers.CharField(source='subject_type.title', read_only=True)
-    audience_name = serializers.CharField(source='audience.title', read_only=True)
-    teachers_count = serializers.IntegerField(source='teachers.count', read_only=True)
-    groups_count = serializers.IntegerField(source='groups.count', read_only=True)
-    
-    class Meta:
-        model = Subjects
-        fields = [
-            'id',
-            'title',
-            'subject_type',
-            'subject_type_name',
-            'audience',
-            'audience_name',
-            'teachers_count',
-            'groups_count',
-        ]
-        read_only_fields = ['id']
-
-
-class SubjectsDetailSerializer(serializers.ModelSerializer):
-    """Сериализатор для детальной информации о предмете"""
-    
-    subject_type_details = SubjectsTypesSerializer(source='subject_type', read_only=True)
-    schedule_details = ScheduleListSerializer(source='schedule', many=True, read_only=True)
-    
+    subject_title = serializers.CharField(source='subject.title', read_only=True)
+    subject_type = serializers.CharField(source='subject.subject_type.title', read_only=True)
     audience_details = serializers.SerializerMethodField()
     teachers_details = serializers.SerializerMethodField()
     groups_details = serializers.SerializerMethodField()
     
     class Meta:
-        model = Subjects
+        model = SubjectSchedule
         fields = [
             'id',
-            'title',
+            'subject',
+            'subject_title',
             'subject_type',
-            'subject_type_details',
-            'schedule',
-            'schedule_details',
-            'audience',
+            'week_day',
+            'week_day_name',
+            'time_slot',
+            'time_slot_display',
+            'week_type',
             'audience_details',
+            'teachers_details',
+            'groups_details',
+        ]
+        read_only_fields = ['id']
+    
+    def get_time_slot_display(self, obj):
+        return str(obj.time_slot)
+    
+    def get_audience_details(self, obj):
+        """Получить информацию об аудитории"""
+        audience = obj.subject.audience
+        return {
+            'id': audience.id,
+            'title': audience.title,
+            'number': audience.auditorium_number,
+            'floor': audience.floor_number,
+            'building': audience.building.title,
+        }
+    
+    def get_teachers_details(self, obj):
+        """Получить информацию о преподавателях"""
+        teachers = obj.teachers.all()
+        return [
+            {
+                'id': t.id,
+                'username': t.username,
+                'full_name': f"{t.last_name} {t.first_name}" if t.first_name and t.last_name else t.username,
+            }
+            for t in teachers
+        ]
+    
+    def get_groups_details(self, obj):
+        """Получить информацию о группах"""
+        groups = obj.groups.all()
+        return [
+            {
+                'id': g.id,
+                'title': g.title,
+            }
+            for g in groups
+        ]
+
+
+class SubjectScheduleDetailSerializer(serializers.ModelSerializer):
+    """Сериализатор для детальной информации о расписании предмета"""
+    
+    week_day_details = DaySerializer(source='week_day', read_only=True)
+    time_slot_details = TimeSlotSerializer(source='time_slot', read_only=True)
+    teachers_details = serializers.SerializerMethodField()
+    groups_details = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = SubjectSchedule
+        fields = [
+            'id',
+            'subject',
+            'week_day',
+            'week_day_details',
+            'time_slot',
+            'time_slot_details',
+            'week_type',
             'teachers',
             'teachers_details',
             'groups',
             'groups_details',
         ]
         read_only_fields = ['id']
-    
-    def get_audience_details(self, obj):
-        return {
-            'id': obj.audience.id,
-            'title': obj.audience.title,
-            'number': obj.audience.auditorium_number,
-            'floor': obj.audience.floor_number,
-            'building': obj.audience.building.title,
-        }
     
     def get_teachers_details(self, obj):
         teachers = obj.teachers.all()
@@ -202,16 +166,9 @@ class SubjectsDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class SubjectsCreateUpdateSerializer(serializers.ModelSerializer):
-    """Сериализатор для создания/обновления предмета"""
+class SubjectScheduleCreateUpdateSerializer(serializers.ModelSerializer):
+    """Сериализатор для создания/обновления расписания предмета"""
     
-    schedule_ids = serializers.PrimaryKeyRelatedField(
-        queryset=Schedule.objects.all(),
-        many=True,
-        write_only=True,
-        source='schedule',
-        required=False
-    )
     teacher_ids = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='TEACHER'),
         many=True,
@@ -228,14 +185,98 @@ class SubjectsCreateUpdateSerializer(serializers.ModelSerializer):
     )
     
     class Meta:
+        model = SubjectSchedule
+        fields = ['subject', 'week_day', 'time_slot', 'week_type', 'teacher_ids', 'group_ids']
+    
+    def validate(self, data):
+        # Проверяем уникальность комбинации
+        instance = self.instance
+        filters = {
+            'subject': data.get('subject'),
+            'week_day': data.get('week_day'),
+            'time_slot': data.get('time_slot'),
+            'week_type': data.get('week_type', 'BOTH')
+        }
+        
+        # Исключаем текущий объект при обновлении
+        qs = SubjectSchedule.objects.filter(**filters)
+        if instance:
+            qs = qs.exclude(pk=instance.pk)
+        
+        if qs.exists():
+            raise serializers.ValidationError(
+                _('Такое расписание уже существует для этого предмета.')
+            )
+        
+        return data
+
+
+class SubjectsListSerializer(serializers.ModelSerializer):
+    """Сериализатор для списка предметов (краткая информация)"""
+    
+    subject_type_name = serializers.CharField(source='subject_type.title', read_only=True)
+    audience_name = serializers.CharField(source='audience.title', read_only=True)
+    schedules_count = serializers.SerializerMethodField()
+    
+    class Meta:
         model = Subjects
         fields = [
+            'id',
+            'title',
+            'subject_type',
+            'subject_type_name',
+            'audience',
+            'audience_name',
+            'schedules_count',
+        ]
+        read_only_fields = ['id']
+    
+    def get_schedules_count(self, obj):
+        """Получить количество расписаний для предмета"""
+        return obj.schedules.count()
+
+
+class SubjectsDetailSerializer(serializers.ModelSerializer):
+    """Сериализатор для детальной информации о предмете"""
+    
+    subject_type_details = SubjectsTypesSerializer(source='subject_type', read_only=True)
+    schedule_details = SubjectScheduleListSerializer(source='schedules', many=True, read_only=True)
+    
+    audience_details = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Subjects
+        fields = [
+            'id',
+            'title',
+            'subject_type',
+            'subject_type_details',
+            'schedule_details',
+            'audience',
+            'audience_details',
+        ]
+        read_only_fields = ['id']
+    
+    def get_audience_details(self, obj):
+        return {
+            'id': obj.audience.id,
+            'title': obj.audience.title,
+            'number': obj.audience.auditorium_number,
+            'floor': obj.audience.floor_number,
+            'building': obj.audience.building.title,
+        }
+
+
+class SubjectsCreateUpdateSerializer(serializers.ModelSerializer):
+    """Сериализатор для создания/обновления предмета"""
+    
+    class Meta:
+        model = Subjects
+        fields = [
+            'id',
             'title',
             'subject_type',
             'audience',
-            'schedule_ids',
-            'teacher_ids',
-            'group_ids',
         ]
     
     def validate_title(self, value):
@@ -244,40 +285,6 @@ class SubjectsCreateUpdateSerializer(serializers.ModelSerializer):
                 _("Название предмета не может быть пустым.")
             )
         return value.strip()
-    
-    def create(self, validated_data):
-        schedule_data = validated_data.pop('schedule', [])
-        teachers_data = validated_data.pop('teachers', [])
-        groups_data = validated_data.pop('groups', [])
-        
-        subject = Subjects.objects.create(**validated_data)
-        
-        if schedule_data:
-            subject.schedule.set(schedule_data)
-        if teachers_data:
-            subject.teachers.set(teachers_data)
-        if groups_data:
-            subject.groups.set(groups_data)
-        
-        return subject
-    
-    def update(self, instance, validated_data):
-        schedule_data = validated_data.pop('schedule', None)
-        teachers_data = validated_data.pop('teachers', None)
-        groups_data = validated_data.pop('groups', None)
-        
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        
-        if schedule_data is not None:
-            instance.schedule.set(schedule_data)
-        if teachers_data is not None:
-            instance.teachers.set(teachers_data)
-        if groups_data is not None:
-            instance.groups.set(groups_data)
-        
-        return instance
 
 
 class TimetableSerializer(serializers.Serializer):
@@ -293,50 +300,161 @@ class TimetableSerializer(serializers.Serializer):
     week_type = serializers.CharField()
 
 
-class ScheduleOverrideSerializer(serializers.ModelSerializer):
-    """Сериализатор для переопределений расписания"""
+class ScheduleGenerationRequestSerializer(serializers.Serializer):
+    """Сериализатор запроса на генерацию расписания"""
     
-    subject_title = serializers.CharField(source='subject.title', read_only=True)
-    time_slot_display = serializers.CharField(source='time_slot.__str__', read_only=True)
-    audience_display = serializers.CharField(source='audience.__str__', read_only=True, allow_null=True)
+    group_id = serializers.IntegerField(
+        required=True,
+        help_text=_('ID группы для генерации расписания')
+    )
+    subject_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True,
+        help_text=_('Список ID предметов для генерации расписания')
+    )
+    clear_existing = serializers.BooleanField(
+        default=False,
+        help_text=_('Очистить существующее расписание перед генерацией')
+    )
+    prefer_morning = serializers.BooleanField(
+        default=True,
+        help_text=_('Приоритет утренних пар')
+    )
+    time_range = serializers.ChoiceField(
+        choices=['morning', 'mixed', 'afternoon', 'evening', 'full'],
+        required=False,
+        allow_null=True,
+        help_text=_(
+            'Предустановленный временной промежуток: '
+            'morning (08:00-14:30), mixed (11:30-17:00), '
+            'afternoon (13:00-18:20), evening (16:00-21:00), full (весь день)'
+        )
+    )
+    custom_start_time = serializers.TimeField(
+        required=False,
+        allow_null=True,
+        help_text=_('Кастомное время начала (HH:MM), имеет приоритет над time_range')
+    )
+    custom_end_time = serializers.TimeField(
+        required=False,
+        allow_null=True,
+        help_text=_('Кастомное время окончания (HH:MM), требует custom_start_time')
+    )
+    start_day_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text=_('ID начального дня недели (например, понедельник). Если не указано, используются все дни')
+    )
+    end_day_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text=_('ID конечного дня недели (например, пятница). Если не указано, используются все дни')
+    )
     
-    class Meta:
-        model = ScheduleOverride
-        fields = [
-            'id',
-            'subject',
-            'subject_title',
-            'date',
-            'time_slot',
-            'time_slot_display',
-            'audience',
-            'audience_display',
-            'is_cancelled',
-            'notes',
-        ]
-        read_only_fields = ['id']
+    def validate(self, attrs):
+        # Если указано custom_end_time, должно быть и custom_start_time
+        if attrs.get('custom_end_time') and not attrs.get('custom_start_time'):
+            raise serializers.ValidationError({
+                'custom_start_time': _('Необходимо указать время начала')
+            })
+        
+        # Проверка, что время начала < времени окончания
+        if attrs.get('custom_start_time') and attrs.get('custom_end_time'):
+            if attrs['custom_start_time'] >= attrs['custom_end_time']:
+                raise serializers.ValidationError({
+                    'custom_end_time': _('Время окончания должно быть больше времени начала')
+                })
+        
+        # Если указан end_day_id, должен быть и start_day_id
+        if attrs.get('end_day_id') and not attrs.get('start_day_id'):
+            raise serializers.ValidationError({
+                'start_day_id': _('Необходимо указать начальный день недели')
+            })
+        
+        # Проверка, что дни недели существуют
+        from .models import Day
+        if attrs.get('start_day_id'):
+            if not Day.objects.filter(id=attrs['start_day_id']).exists():
+                raise serializers.ValidationError({
+                    'start_day_id': _('День недели с указанным ID не найден')
+                })
+        
+        if attrs.get('end_day_id'):
+            if not Day.objects.filter(id=attrs['end_day_id']).exists():
+                raise serializers.ValidationError({
+                    'end_day_id': _('День недели с указанным ID не найден')
+                })
+        
+        return attrs
     
-    def validate_date(self, value):
-        """Проверка, что дата не в прошлом"""
-        from django.utils import timezone
-        if value < timezone.now().date():
+    def validate_group_id(self, value):
+        # Проверяем существование группы
+        from apps.groups.models import StudyGroups
+        if not StudyGroups.objects.filter(id=value).exists():
             raise serializers.ValidationError(
-                _('Нельзя создавать переопределения для прошедших дат.')
+                _('Группа не найдена в системе')
             )
+        
+        return value
+    
+    def validate_subject_ids(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                _('Необходимо указать хотя бы один предмет')
+            )
+        
+        # Проверяем существование предметов
+        from .models import Subjects
+        existing_subjects = Subjects.objects.filter(id__in=value)
+        if existing_subjects.count() != len(value):
+            raise serializers.ValidationError(
+                _('Некоторые предметы не найдены в системе')
+            )
+        
         return value
 
 
-class ScheduleOverrideCreateUpdateSerializer(serializers.ModelSerializer):
-    """Сериализатор для создания/обновления переопределений расписания"""
+class ScheduleGenerationResponseSerializer(serializers.Serializer):
+    """Сериализатор ответа на генерацию расписания"""
     
-    class Meta:
-        model = ScheduleOverride
-        fields = [
-            'subject',
-            'date',
-            'time_slot',
-            'audience',
-            'is_cancelled',
-            'notes',
-        ]
+    success = serializers.BooleanField()
+    messages = serializers.ListField(child=serializers.CharField())
+    statistics = serializers.DictField()
+
+
+class ScheduleValidationResponseSerializer(serializers.Serializer):
+    """Сериализатор ответа на валидацию расписания"""
+    
+    is_valid = serializers.BooleanField()
+    conflicts = serializers.ListField(child=serializers.CharField())
+
+
+class ScheduleStatisticsSerializer(serializers.Serializer):
+    """Сериализатор статистики расписания"""
+    
+    total_groups = serializers.IntegerField()
+    total_subjects = serializers.IntegerField()
+    subjects_with_schedule = serializers.IntegerField()
+    subjects_without_schedule = serializers.IntegerField()
+    total_schedule_slots = serializers.IntegerField()
+    average_slots_per_subject = serializers.FloatField()
+
+
+class TimeRangeSerializer(serializers.Serializer):
+    """Сериализатор для временного промежутка"""
+    
+    name = serializers.CharField()
+    start_time = serializers.CharField()
+    end_time = serializers.CharField()
+    description = serializers.CharField()
+
+
+class AvailableTimeRangesSerializer(serializers.Serializer):
+    """Сериализатор для списка доступных временных промежутков"""
+    
+    morning = TimeRangeSerializer()
+    mixed = TimeRangeSerializer()
+    afternoon = TimeRangeSerializer()
+    evening = TimeRangeSerializer()
+    full = TimeRangeSerializer()
 

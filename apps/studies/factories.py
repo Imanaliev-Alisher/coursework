@@ -3,7 +3,7 @@ from factory.django import DjangoModelFactory
 from faker import Faker
 from datetime import time, date, timedelta
 
-from .models import TimeSlot, Day, SubjectsTypes, Schedule, Subjects, ScheduleOverride
+from .models import TimeSlot, Day, SubjectsTypes, SubjectSchedule, Subjects
 from .choices import EvenOddBoth
 from apps.buildings.factories import AudiencesFactory
 from apps.groups.factories import StudyGroupFactory
@@ -44,16 +44,43 @@ class SubjectsTypesFactory(DjangoModelFactory):
     title = factory.Iterator(['Лекция', 'Практика', 'Лабораторная', 'Семинар'])
 
 
-class ScheduleFactory(DjangoModelFactory):
-    """Фабрика для создания расписания"""
+class SubjectScheduleFactory(DjangoModelFactory):
+    """Фабрика для создания расписания предмета"""
     
     class Meta:
-        model = Schedule
-        django_get_or_create = ('week_day', 'time_slot', 'week_type')
+        model = SubjectSchedule
+        django_get_or_create = ('subject', 'week_day', 'time_slot', 'week_type')
     
+    subject = factory.SubFactory('apps.studies.factories.SubjectsFactory')
     week_day = factory.SubFactory(DayFactory)
     time_slot = factory.SubFactory(TimeSlotFactory)
     week_type = EvenOddBoth.BOTH
+    
+    @factory.post_generation
+    def teachers(self, create, extracted, **kwargs):
+        """Добавление преподавателей к расписанию"""
+        if not create:
+            return
+        
+        if extracted:
+            for teacher in extracted:
+                self.teachers.add(teacher)
+        else:
+            teacher = TeacherFactory()
+            self.teachers.add(teacher)
+    
+    @factory.post_generation
+    def groups(self, create, extracted, **kwargs):
+        """Добавление групп к расписанию"""
+        if not create:
+            return
+        
+        if extracted:
+            for group in extracted:
+                self.groups.add(group)
+        else:
+            group = StudyGroupFactory()
+            self.groups.add(group)
 
 
 class SubjectsFactory(DjangoModelFactory):
@@ -72,57 +99,3 @@ class SubjectsFactory(DjangoModelFactory):
     ])
     audience = factory.SubFactory(AudiencesFactory)
     subject_type = factory.SubFactory(SubjectsTypesFactory)
-    
-    @factory.post_generation
-    def schedule(self, create, extracted, **kwargs):
-        """Добавление расписаний"""
-        if not create:
-            return
-        
-        if extracted:
-            for sched in extracted:
-                self.schedule.add(sched)
-        else:
-            # По умолчанию добавляем одно расписание
-            schedule = ScheduleFactory()
-            self.schedule.add(schedule)
-    
-    @factory.post_generation
-    def teachers(self, create, extracted, **kwargs):
-        """Добавление преподавателей"""
-        if not create:
-            return
-        
-        if extracted:
-            for teacher in extracted:
-                self.teachers.add(teacher)
-        else:
-            teacher = TeacherFactory()
-            self.teachers.add(teacher)
-    
-    @factory.post_generation
-    def groups(self, create, extracted, **kwargs):
-        """Добавление групп"""
-        if not create:
-            return
-        
-        if extracted:
-            for group in extracted:
-                self.groups.add(group)
-        else:
-            group = StudyGroupFactory()
-            self.groups.add(group)
-
-
-class ScheduleOverrideFactory(DjangoModelFactory):
-    """Фабрика для переопределений расписания"""
-    
-    class Meta:
-        model = ScheduleOverride
-    
-    subject = factory.SubFactory(SubjectsFactory)
-    date = factory.LazyFunction(lambda: date.today() + timedelta(days=7))
-    time_slot = factory.SubFactory(TimeSlotFactory)
-    audience = factory.SubFactory(AudiencesFactory)
-    is_cancelled = False
-    notes = factory.Faker('sentence', locale='ru_RU')

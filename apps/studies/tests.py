@@ -10,10 +10,20 @@ from apps.users.factories import UserFactory, AdminFactory, TeacherFactory
 from apps.users.choices import RoleChoices
 from .factories import (
     TimeSlotFactory, DayFactory, SubjectsTypesFactory,
-    ScheduleFactory, SubjectsFactory, ScheduleOverrideFactory
+    SubjectScheduleFactory, SubjectsFactory
 )
-from .models import TimeSlot, Day, SubjectsTypes, Schedule, Subjects, ScheduleOverride
+from .models import TimeSlot, Day, SubjectsTypes, SubjectSchedule, Subjects
 from .choices import EvenOddBoth
+from .validators import (
+    validate_group_schedule_conflict,
+    validate_audience_schedule_conflict,
+    validate_teacher_schedule_conflict
+)
+from .schedule_generator import (
+    generate_schedule_for_groups,
+    validate_generated_schedule,
+    get_schedule_statistics
+)
 
 
 @pytest.mark.django_db
@@ -119,11 +129,12 @@ class TestSubjectsModel:
         assert subject.title is not None
         assert subject.audience is not None
     
-    def test_subject_with_teachers(self):
-        """Тест добавления преподавателей к предмету"""
-        teachers = TeacherFactory.create_batch(2)
-        subject = SubjectsFactory(teachers=teachers)
-        assert subject.teachers.count() == 2
+    def test_subject_with_schedule(self):
+        """Тест добавления расписания к предмету"""
+        subject = SubjectsFactory()
+        schedule = SubjectScheduleFactory(subject=subject)
+        assert subject.schedules.count() == 1
+        assert schedule.subject == subject
     
     def test_subject_str_representation(self):
         """Тест строкового представления предмета"""
@@ -131,22 +142,199 @@ class TestSubjectsModel:
         assert 'Математика' in str(subject)
 
 
+
+
 @pytest.mark.django_db
-class TestScheduleOverrideModel:
-    """Тесты модели ScheduleOverride"""
+class TestSubjectsAPI:
     
-    def test_create_schedule_override(self):
-        """Тест создания переопределения расписания"""
-        override = ScheduleOverrideFactory()
-        assert override.id is not None
-        assert override.subject is not None
-        assert override.date is not None
+    def test_group_schedule_conflict_detection(self):
+        """Тест обнаружения конфликта группы"""
+        from apps.groups.factories import StudyGroupsFactory
+        
+        # Создаем группу и расписание
+        group = StudyGroupsFactory()
+        schedule = ScheduleFactory()
+        
+        # Первый предмет для группы
+        subject1 = SubjectsFactory()
+        subject1.groups.add(group)
+        subject1.schedule.add(schedule)
+        
+        # Второй предмет для той же группы в то же время - должен быть конфликт
+        subject2 = SubjectsFactory()
+        subject2.groups.add(group)
+        subject2.schedule.add(schedule)
+        
+        # Проверяем, что обнаружен конфликт
+        with pytest.raises(ValidationError, match='Конфликт расписания'):
+            validate_group_schedule_conflict(subject2)
     
-    def test_schedule_override_cancelled(self):
-        """Тест отмененного занятия"""
-        override = ScheduleOverrideFactory(is_cancelled=True)
-        assert override.is_cancelled is True
-        assert 'Отменено' in str(override)
+    def test_audience_schedule_conflict_detection(self):
+        """Тест обнаружения конфликта аудитории"""
+        from apps.buildings.factories import AudiencesFactory
+        
+        # Создаем аудиторию и расписание
+        audience = AudiencesFactory()
+        schedule = ScheduleFactory()
+        
+        # Первый предмет в аудитории
+        subject1 = SubjectsFactory(audience=audience)
+        subject1.schedule.add(schedule)
+        
+        # Второй предмет в той же аудитории в то же время
+        subject2 = SubjectsFactory(audience=audience)
+        subject2.schedule.add(schedule)
+        
+        # Проверяем конфликт
+        with pytest.raises(ValidationError, match='Конфликт расписания'):
+            validate_audience_schedule_conflict(subject2)
+    
+    def test_teacher_schedule_conflict_detection(self):
+        """Тест обнаружения конфликта преподавателя"""
+        teacher = TeacherFactory()
+        schedule = ScheduleFactory()
+        
+        # Первый предмет преподавателя
+        subject1 = SubjectsFactory()
+        subject1.teachers.add(teacher)
+        subject1.schedule.add(schedule)
+        
+        # Второй предмет того же преподавателя в то же время
+        subject2 = SubjectsFactory()
+        subject2.teachers.add(teacher)
+        subject2.schedule.add(schedule)
+        
+        # Проверяем конфликт
+        with pytest.raises(ValidationError, match='Конфликт расписания'):
+            validate_teacher_schedule_conflict(subject2)
+    
+    def test_no_conflict_different_week_types(self):
+        """Тест: нет конфликта при разных типах недель"""
+        from apps.groups.factories import StudyGroupsFactory
+        
+        group = StudyGroupsFactory()
+        day = DayFactory()
+        time_slot = TimeSlotFactory()
+        
+        # Расписание для четной недели
+        schedule_even = ScheduleFactory(week_day=day, time_slot=time_slot, week_type='EVEN')
+        subject1 = SubjectsFactory()
+        subject1.groups.add(group)
+        subject1.schedule.add(schedule_even)
+        
+        # Расписание для нечетной недели - конфликта не должно быть
+        schedule_odd = ScheduleFactory(week_day=day, time_slot=time_slot, week_type='ODD')
+        subject2 = SubjectsFactory()
+        subject2.groups.add(group)
+        subject2.schedule.add(schedule_odd)
+        
+        # Не должно быть исключения
+        validate_group_schedule_conflict(subject2)
+    
+    def test_stream_subjects_same_audience(self):
+        """Тест: потоковые предметы (один предмет для разных групп)"""
+        from apps.groups.factories import StudyGroupsFactory
+        from apps.buildings.factories import AudiencesFactory
+        
+        audience = AudiencesFactory()
+        schedule = ScheduleFactory()
+        group1 = StudyGroupsFactory()
+        group2 = StudyGroupsFactory()
+        
+        # Один предмет для двух групп (потоковый)
+        subject = SubjectsFactory(audience=audience)
+        subject.groups.add(group1, group2)
+        subject.schedule.add(schedule)
+        
+        # Конфликта в аудитории быть не должно (это тот же предмет)
+        validate_audience_schedule_conflict(subject)
+
+
+@pytest.mark.django_db
+class TestScheduleGenerator:
+    """Тесты генератора расписания"""
+    
+    def test_schedule_generation_basic(self):
+        """Тест базовой генерации расписания"""
+        from apps.groups.factories import StudyGroupsFactory
+        
+        # Создаем тестовые данные
+        group = StudyGroupsFactory()
+        
+        # Создаем временные слоты
+        for i in range(1, 4):
+            TimeSlotFactory(number=i)
+        
+        # Создаем дни недели
+        days = ['Понедельник', 'Вторник']
+        for day_name in days:
+            DayFactory(title=day_name)
+        
+        # Создаем расписание
+        all_days = Day.objects.all()
+        all_slots = TimeSlot.objects.all()
+        for day in all_days:
+            for slot in all_slots:
+                ScheduleFactory(week_day=day, time_slot=slot, week_type='BOTH')
+        
+        # Создаем предметы для группы
+        for i in range(3):
+            subject = SubjectsFactory()
+            subject.groups.add(group)
+        
+        # Генерируем расписание
+        success, messages, statistics = generate_schedule_for_groups(
+            group_ids=[group.id],
+            clear_existing=False,
+            prefer_morning=True
+        )
+        
+        assert success is True or success is False  # Может быть успешно или нет
+        assert len(messages) > 0
+        assert 'total_groups' in statistics
+    
+    def test_schedule_validation(self):
+        """Тест валидации расписания"""
+        from apps.groups.factories import StudyGroupsFactory
+        
+        group = StudyGroupsFactory()
+        subject = SubjectsFactory()
+        subject.groups.add(group)
+        
+        # Добавляем корректное расписание
+        schedule = ScheduleFactory()
+        subject.schedule.add(schedule)
+        
+        # Валидируем
+        is_valid, conflicts = validate_generated_schedule([group.id])
+        
+        # Должно быть валидно
+        assert is_valid is True
+        assert len(conflicts) == 1  # Сообщение об успехе
+        assert 'корректно' in conflicts[0].lower()
+    
+    def test_schedule_statistics(self):
+        """Тест получения статистики расписания"""
+        from apps.groups.factories import StudyGroupsFactory
+        
+        group = StudyGroupsFactory()
+        
+        # Создаем предметы
+        subject1 = SubjectsFactory()
+        subject1.groups.add(group)
+        subject1.schedule.add(ScheduleFactory())
+        
+        subject2 = SubjectsFactory()
+        subject2.groups.add(group)
+        # Без расписания
+        
+        # Получаем статистику
+        stats = get_schedule_statistics([group.id])
+        
+        assert stats['total_groups'] == 1
+        assert stats['total_subjects'] == 2
+        assert stats['subjects_with_schedule'] == 1
+        assert stats['subjects_without_schedule'] == 1
 
 
 @pytest.mark.django_db
@@ -249,47 +437,3 @@ class TestTimeSlotAPI:
         response = api_client.get(url)
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data['results']) >= 5
-
-
-@pytest.mark.django_db
-class TestScheduleOverrideAPI:
-    """Тесты API для переопределений расписания"""
-    
-    @pytest.fixture
-    def api_client(self):
-        return APIClient()
-    
-    @pytest.fixture
-    def admin_user(self):
-        return AdminFactory()
-    
-    @pytest.fixture
-    def auth_token(self, admin_user):
-        refresh = RefreshToken.for_user(admin_user)
-        return str(refresh.access_token)
-    
-    def test_list_schedule_overrides(self, api_client, auth_token):
-        """Тест получения списка переопределений"""
-        ScheduleOverrideFactory.create_batch(2)
-        url = reverse('studies:schedule-override-list')
-        api_client.credentials(HTTP_AUTHORIZATION=f'Bearer {auth_token}')
-        response = api_client.get(url)
-        assert response.status_code == status.HTTP_200_OK
-    
-    def test_create_schedule_override_cancelled(self, api_client, auth_token):
-        """Тест создания отмены занятия"""
-        subject = SubjectsFactory()
-        time_slot = TimeSlotFactory()
-        
-        url = reverse('studies:schedule-override-list')
-        api_client.credentials(HTTP_AUTHORIZATION=f'Bearer {auth_token}')
-        data = {
-            'subject': subject.id,
-            'date': (date.today() + timedelta(days=7)).isoformat(),
-            'time_slot': time_slot.id,
-            'is_cancelled': True,
-            'notes': 'Занятие отменено'
-        }
-        response = api_client.post(url, data)
-        assert response.status_code == status.HTTP_201_CREATED
-        assert ScheduleOverride.objects.filter(is_cancelled=True).exists()

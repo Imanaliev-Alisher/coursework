@@ -9,13 +9,30 @@ from django.utils import timezone
 
 from apps.buildings.models import Buildings, Audiences, AudiencesTypes
 from apps.groups.models import StudyGroups
-from apps.studies.models import TimeSlot, Day, SubjectsTypes, Schedule, Subjects
+from apps.studies.models import TimeSlot, Day, SubjectsTypes, SubjectSchedule, Subjects
 from apps.studies.choices import EvenOddBoth
 
 import random
 from datetime import time
 
 User = get_user_model()
+
+
+def transliterate(text):
+    """Транслитерация кириллицы в латиницу"""
+    translit_dict = {
+        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+        'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+        'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+        'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+        'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+        'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'Yo',
+        'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
+        'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
+        'Ф': 'F', 'Х': 'H', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Sch',
+        'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya'
+    }
+    return ''.join(translit_dict.get(char, char) for char in text)
 
 
 class Command(BaseCommand):
@@ -64,13 +81,9 @@ class Command(BaseCommand):
             subject_types = self.create_subject_types()
             self.stdout.write(self.style.SUCCESS(f'✓ Создано {len(subject_types)} типов предметов'))
 
-            # 8. Создаем расписание
-            schedules = self.create_schedules(days, time_slots)
-            self.stdout.write(self.style.SUCCESS(f'✓ Создано {len(schedules)} записей расписания'))
-
-            # 9. Создаем предметы
-            subjects = self.create_subjects(subject_types, schedules, audiences, teachers, groups)
-            self.stdout.write(self.style.SUCCESS(f'✓ Создано {len(subjects)} предметов'))
+            # 8. Создаем предметы с расписанием
+            subjects = self.create_subjects(subject_types, days, time_slots, audiences, teachers, groups)
+            self.stdout.write(self.style.SUCCESS(f'✓ Создано {len(subjects)} предметов с расписанием'))
 
         self.stdout.write(self.style.SUCCESS('\n🎉 База данных успешно заполнена!'))
         self.print_credentials()
@@ -78,7 +91,7 @@ class Command(BaseCommand):
     def clear_database(self):
         """Очистка всех данных"""
         Subjects.objects.all().delete()
-        Schedule.objects.all().delete()
+        SubjectSchedule.objects.all().delete()
         SubjectsTypes.objects.all().delete()
         Day.objects.all().delete()
         TimeSlot.objects.all().delete()
@@ -222,7 +235,11 @@ class Command(BaseCommand):
             for i in range(1, 11):
                 first_name = random.choice(first_names)
                 last_name = random.choice(last_names)
-                username = f'{last_name.lower()}_{first_name[0].lower()}{i}_{group_title.lower().replace("-", "")}'
+                # Транслитерация кириллицы в латиницу для username
+                last_name_latin = transliterate(last_name).lower()
+                first_name_latin = transliterate(first_name[0]).lower()
+                group_title_latin = transliterate(group_title).lower().replace("-", "")
+                username = f'{last_name_latin}_{first_name_latin}{i}_{group_title_latin}'
                 
                 student = User.objects.create_user(
                     username=username,
@@ -345,25 +362,8 @@ class Command(BaseCommand):
 
         return subject_types
 
-    def create_schedules(self, days, time_slots):
-        """Создает записи расписания"""
-        schedules = []
-        week_types = [EvenOddBoth.EVEN, EvenOddBoth.ODD, EvenOddBoth.BOTH]
-
-        for day in days[:5]:  # Только будние дни
-            for slot in time_slots[:4]:  # Первые 4 пары
-                for week_type in [EvenOddBoth.BOTH, EvenOddBoth.EVEN, EvenOddBoth.ODD]:
-                    schedule, _ = Schedule.objects.get_or_create(
-                        week_day=day,
-                        time_slot=slot,
-                        week_type=week_type
-                    )
-                    schedules.append(schedule)
-
-        return schedules
-
-    def create_subjects(self, subject_types, schedules, audiences, teachers, groups):
-        """Создает 10 предметов"""
+    def create_subjects(self, subject_types, days, time_slots, audiences, teachers, groups):
+        """Создает 10 предметов с расписанием"""
         subjects_data = [
             ('Программирование на Python', 'Лекция'),
             ('Программирование на Python', 'Практика'),
@@ -390,30 +390,48 @@ class Command(BaseCommand):
             'Семинар': seminar_type
         }
 
-        used_schedules = set()
+        # Отслеживаем занятые слоты для избежания конфликтов
+        used_slots = set()
 
         for title, type_name in subjects_data:
-            # Находим доступное расписание
-            available_schedules = [s for s in schedules if s.id not in used_schedules]
-            selected_schedule = random.choice(available_schedules)
-            used_schedules.add(selected_schedule.id)
-
             subject = Subjects.objects.create(
                 title=title,
                 audience=random.choice(audiences),
                 subject_type=type_map[type_name]
             )
 
-            # Добавляем расписание
-            subject.schedule.add(selected_schedule)
-
-            # Добавляем 1-2 преподавателей
-            subject_teachers = random.sample(teachers, random.randint(1, 2))
-            subject.teachers.set(subject_teachers)
-
-            # Добавляем 1-2 группы
-            subject_groups = random.sample(groups, random.randint(1, 2))
-            subject.groups.set(subject_groups)
+            # Создаем 1-2 расписания для предмета
+            schedule_count = random.randint(1, 2)
+            for _ in range(schedule_count):
+                # Находим свободный слот
+                attempts = 0
+                while attempts < 50:
+                    day = random.choice(days[:5])  # Только будние дни
+                    slot = random.choice(time_slots[:4])  # Первые 4 пары
+                    week_type = random.choice([EvenOddBoth.BOTH, EvenOddBoth.EVEN, EvenOddBoth.ODD])
+                    
+                    slot_key = (day.id, slot.id, week_type)
+                    if slot_key not in used_slots:
+                        used_slots.add(slot_key)
+                        
+                        schedule = SubjectSchedule.objects.create(
+                            subject=subject,
+                            week_day=day,
+                            time_slot=slot,
+                            week_type=week_type
+                        )
+                        
+                        # Добавляем 1-2 преподавателей к расписанию
+                        schedule_teachers = random.sample(teachers, random.randint(1, 2))
+                        schedule.teachers.set(schedule_teachers)
+                        
+                        # Добавляем 1-2 группы к расписанию
+                        schedule_groups = random.sample(groups, random.randint(1, 2))
+                        schedule.groups.set(schedule_groups)
+                        
+                        break
+                    
+                    attempts += 1
 
             subjects.append(subject)
 

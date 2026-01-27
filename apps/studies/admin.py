@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TimeSlot, Day, SubjectsTypes, Schedule, Subjects, ScheduleOverride
+from .models import TimeSlot, Day, SubjectsTypes, SubjectSchedule, Subjects
 
 
 @admin.register(TimeSlot)
@@ -21,24 +21,32 @@ class SubjectsTypesAdmin(admin.ModelAdmin):
     search_fields = ['title',]
 
 
-@admin.register(Schedule)
-class ScheduleAdmin(admin.ModelAdmin):
-    list_display = ['week_day', 'time_slot', 'week_type']
-    list_filter = ['week_day', 'time_slot', 'week_type']
+@admin.register(SubjectSchedule)
+class SubjectScheduleAdmin(admin.ModelAdmin):
+    list_display = ['subject', 'week_day', 'time_slot', 'week_type', 'get_teachers', 'get_groups']
+    list_filter = ['week_day', 'time_slot', 'week_type', 'subject__subject_type']
+    search_fields = ['subject__title']
+    raw_id_fields = ['subject']
+    
+    def get_teachers(self, obj):
+        return ", ".join([t.get_full_name() for t in obj.teachers.all()])
+    get_teachers.short_description = 'Преподаватели'
+    
+    def get_groups(self, obj):
+        return ", ".join([g.title for g in obj.groups.all()])
+    get_groups.short_description = 'Группы'
+
+
+class SubjectScheduleInline(admin.TabularInline):
+    model = SubjectSchedule
+    extra = 1
+    fields = ['week_day', 'time_slot', 'week_type']
+    # teachers и groups редактируются в отдельной админке SubjectSchedule
 
 
 @admin.register(Subjects)
 class SubjectsAdmin(admin.ModelAdmin):
     list_display = ['title', 'subject_type', 'audience']
-    list_filter = ['subject_type', 'groups']
+    list_filter = ['subject_type']
     search_fields = ['title',]
-    filter_horizontal = ['schedule', 'teachers', 'groups']
-
-
-@admin.register(ScheduleOverride)
-class ScheduleOverrideAdmin(admin.ModelAdmin):
-    list_display = ['subject', 'date', 'time_slot', 'audience', 'is_cancelled']
-    list_filter = ['is_cancelled', 'date']
-    search_fields = ['subject__title', 'notes']
-    ordering = ['-date', 'time_slot__number']
-
+    inlines = [SubjectScheduleInline]

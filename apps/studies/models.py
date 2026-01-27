@@ -70,7 +70,47 @@ class SubjectsTypes(models.Model):
         return self.title
 
 
-class Schedule(models.Model):
+class Subjects(models.Model):
+    title = models.CharField(
+        _("Название предмета"),
+        max_length=255,
+        help_text=_('Введите название предмета')
+    )
+    audience = models.ForeignKey(
+        Audiences,
+        on_delete=models.PROTECT,
+        related_name='subjects',
+        verbose_name=_('Аудитория'),
+        help_text=_('Выберите аудиторию')
+    )
+    subject_type = models.ForeignKey(
+        SubjectsTypes,
+        on_delete=models.PROTECT,
+        related_name="subjects",
+        verbose_name=_('Тип предмета'),
+        help_text=_('Выберите тип предмета')
+    )
+
+    class Meta:
+        verbose_name = _('Предмет')
+        verbose_name_plural = _('Предметы')
+
+    def __str__(self):
+        return f"{self.title} ({self.subject_type})"
+
+
+class SubjectSchedule(models.Model):
+    """
+    Расписание предмета - связь между предметом и временным слотом.
+    Заменяет сложную структуру с предварительно созданными комбинациями.
+    """
+    subject = models.ForeignKey(
+        Subjects,
+        on_delete=models.CASCADE,
+        related_name='schedules',
+        verbose_name=_('Предмет'),
+        help_text=_('Выберите предмет')
+    )
     week_day = models.ForeignKey(
         Day,
         on_delete=models.PROTECT,
@@ -90,111 +130,42 @@ class Schedule(models.Model):
         max_length=31,
         help_text=_('Выберите тип недели')
     )
-
-    class Meta:
-        verbose_name = _('Расписание')
-        verbose_name_plural = _('Расписания')
-        unique_together = ['week_day', 'time_slot', 'week_type']
-
-    def __str__(self):
-        return f"{self.week_day} - {self.time_slot} ({self.week_type})"
-
-
-class Subjects(models.Model):
-    title = models.CharField(
-        _("Название предмета"),
-        max_length=255,
-        help_text=_('Введите название предмета')
-    )
-    schedule = models.ManyToManyField(
-        Schedule,
-        verbose_name=_('Расписание'),
-        help_text=_('Выберите подходящее расписание')
-    )
-    audience = models.ForeignKey(
-        Audiences,
-        on_delete=models.PROTECT,
-        related_name='subjects',
-        verbose_name=_('Аудитория'),
-        help_text=_('Выберите аудиторию')
-    )
-    subject_type = models.ForeignKey(
-        SubjectsTypes,
-        on_delete=models.PROTECT,
-        related_name="subjects",
-        verbose_name=_('Тип предмета'),
-        help_text=_('Выберите тип предмета')
-    )
     teachers = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
-        related_name='teaching_subjects',
+        related_name='teaching_schedules',
         verbose_name=_('Преподаватели'),
-        help_text=_('Выберите преподавателей предмета'),
+        help_text=_('Выберите преподавателей для этого занятия'),
         limit_choices_to={'role': 'TEACHER'}
     )
     groups = models.ManyToManyField(
         StudyGroups,
-        related_name='subjects',
+        related_name='schedules',
         verbose_name=_('Учебные группы'),
-        help_text=_('Выберите учебные группы')
+        help_text=_('Выберите учебные группы для этого занятия')
     )
 
     class Meta:
-        verbose_name = _('Предмет')
-        verbose_name_plural = _('Предметы')
+        verbose_name = _('Расписание предмета')
+        verbose_name_plural = _('Расписания предметов')
+        unique_together = ['subject', 'week_day', 'time_slot', 'week_type']
+        ordering = ['week_day', 'time_slot__number']
+
+    def clean(self):
+        """Валидация на конфликты расписания"""
+        super().clean()
+        
+        # Импортируем здесь, чтобы избежать циклических импортов
+        from .validators import check_schedule_conflicts
+        
+        # Проверяем только если объект уже сохранен (есть pk)
+        if self.pk:
+            check_schedule_conflicts(self)
+
+    def save(self, *args, **kwargs):
+        """Переопределяем save для валидации перед сохранением"""
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.title} ({self.subject_type})"
-
-
-class ScheduleOverride(models.Model):
-    """
-    Переопределение расписания для конкретной недели.
-    Позволяет создавать динамическое расписание на определенный период.
-    """
-    subject = models.ForeignKey(
-        Subjects,
-        on_delete=models.CASCADE,
-        related_name='schedule_overrides',
-        verbose_name=_('Предмет'),
-        help_text=_('Выберите предмет')
-    )
-    date = models.DateField(
-        _('Дата'),
-        help_text=_('Дата проведения занятия')
-    )
-    time_slot = models.ForeignKey(
-        TimeSlot,
-        on_delete=models.PROTECT,
-        verbose_name=_('Временной слот (пара)'),
-        help_text=_('Выберите номер пары')
-    )
-    audience = models.ForeignKey(
-        Audiences,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        verbose_name=_('Аудитория (переопределение)'),
-        help_text=_('Оставьте пустым, чтобы использовать аудиторию из основного расписания')
-    )
-    is_cancelled = models.BooleanField(
-        _('Занятие отменено'),
-        default=False,
-        help_text=_('Отметьте, если занятие отменяется')
-    )
-    notes = models.TextField(
-        _('Примечания'),
-        blank=True,
-        help_text=_('Дополнительная информация об изменении')
-    )
-
-    class Meta:
-        verbose_name = _('Переопределение расписания')
-        verbose_name_plural = _('Переопределения расписания')
-        unique_together = ['subject', 'date', 'time_slot']
-        ordering = ['date', 'time_slot__number']
-
-    def __str__(self):
-        status = _('Отменено') if self.is_cancelled else _('Перенесено')
-        return f"{self.subject.title} - {self.date} ({status})"
+        return f"{self.subject.title} - {self.week_day} {self.time_slot} ({self.week_type})"
 

@@ -66,4 +66,4 @@ services:
       - production_django_media:/usr/share/nginx/media:ro
       - production_django_static:/usr/share/nginx/staticfiles
     ports:
-      - '8000:80'
+      - '8888:80'
